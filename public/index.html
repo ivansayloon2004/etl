@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bus Route Performance Tracker</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div class="hero-copy">
+          <h1>Bus Route Performance Tracker</h1>
+          <p>
+            Compare ETL and ELT pipelines for passenger demand, occupancy, delay patterns,
+            and peak-hour behavior in a public transportation setting.
+          </p>
+        </div>
+
+        <div class="hero-actions">
+          <button id="seed-data-btn" class="button-primary">Generate 48 Demo Trips</button>
+          <button id="refresh-btn" class="button-secondary">Refresh Analytics</button>
+        </div>
+
+        <div class="status-strip">
+          <div class="status-chip">
+            <span>Storage</span>
+            <strong id="storage-engine">Loading...</strong>
+          </div>
+          <div class="status-chip">
+            <span>Timezone</span>
+            <strong id="timezone-label">Asia/Singapore</strong>
+          </div>
+          <div class="status-chip">
+            <span>Dashboard mode</span>
+            <strong id="mode-label">ETL</strong>
+          </div>
+        </div>
+      </header>
+
+      <main class="main-layout">
+        <section class="panel-grid">
+          <article class="card input-card">
+            <div class="section-heading">
+              <h2>Add Trip Event</h2>
+              <p>Submit one trip into ETL or ELT to see the difference immediately.</p>
+            </div>
+
+            <form id="trip-form" class="form-grid">
+              <label>
+                Pipeline
+                <select id="pipeline-select" name="pipeline">
+                  <option value="etl">ETL</option>
+                  <option value="elt">ELT</option>
+                </select>
+              </label>
+
+              <label>
+                Route
+                <input id="route-name" name="routeName" list="route-options" placeholder="North Loop" required />
+                <datalist id="route-options"></datalist>
+              </label>
+
+              <label>
+                Passengers
+                <input id="passenger-count" name="passengerCount" type="number" min="0" value="34" required />
+              </label>
+
+              <label>
+                Delay (minutes)
+                <input id="delay-minutes" name="delayMinutes" type="number" min="0" step="0.1" value="6" required />
+              </label>
+
+              <label>
+                Timestamp
+                <input id="trip-timestamp" name="timestamp" type="datetime-local" required />
+              </label>
+
+              <label>
+                Bus Capacity
+                <input id="bus-capacity" name="capacity" type="number" min="10" value="60" required />
+              </label>
+
+              <button type="submit" class="button-primary form-submit">Send Trip</button>
+            </form>
+          </article>
+
+          <article class="card csv-card">
+            <div class="section-heading">
+              <h2>CSV Bulk Upload</h2>
+              <p>Paste CSV rows and push them into either pipeline for faster testing.</p>
+            </div>
+
+            <textarea id="csv-text" rows="9" spellcheck="false"></textarea>
+
+            <div class="button-row">
+              <button id="load-sample-btn" class="button-secondary" type="button">Load Sample CSV</button>
+              <button id="upload-etl-btn" class="button-primary" type="button">Upload to ETL</button>
+              <button id="upload-elt-btn" class="button-secondary" type="button">Upload to ELT</button>
+            </div>
+          </article>
+        </section>
+
+        <section class="mode-switch" aria-label="Dashboard mode switch">
+          <button class="mode-tab active" data-mode="etl" type="button">ETL View</button>
+          <button class="mode-tab" data-mode="elt" type="button">ELT View</button>
+          <button class="mode-tab" data-mode="compare" type="button">Compare</button>
+        </section>
+
+        <section id="metric-grid" class="metric-grid"></section>
+
+        <section class="analytics-grid">
+          <article class="card wide-card">
+            <div class="section-heading">
+              <h2>Passenger Trend</h2>
+              <p id="trend-caption">Daily ridership by selected pipeline.</p>
+            </div>
+            <div id="passenger-trend" class="chart-surface"></div>
+          </article>
+
+          <article class="card">
+            <div class="section-heading">
+              <h2>Peak Hours</h2>
+              <p>Busiest operating windows across the day.</p>
+            </div>
+            <div id="peak-hours" class="mini-bars"></div>
+          </article>
+
+          <article class="card">
+            <div class="section-heading">
+              <h2>Delay Profile</h2>
+              <p>Routes above threshold are flagged as higher risk.</p>
+            </div>
+            <div id="delay-profile" class="delay-profile"></div>
+          </article>
+
+          <article class="card wide-card">
+            <div class="section-heading">
+              <h2>Route Efficiency</h2>
+              <p>Passenger volume, occupancy, delay, and risk in one table.</p>
+            </div>
+
+            <div class="table-wrap">
+              <table class="route-table">
+                <thead>
+                  <tr>
+                    <th>Route</th>
+                    <th>Trips</th>
+                    <th>Passengers</th>
+                    <th>Avg Delay</th>
+                    <th>Occupancy</th>
+                    <th>Efficiency</th>
+                    <th>Risk</th>
+                  </tr>
+                </thead>
+                <tbody id="route-table-body"></tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="card wide-card">
+            <div class="section-heading">
+              <h2>ETL vs ELT Comparison</h2>
+              <p>Use this view to explain performance, processing, and storage differences.</p>
+            </div>
+            <div id="comparison-grid" class="comparison-grid"></div>
+          </article>
+
+          <article class="card wide-card">
+            <div class="section-heading">
+              <h2>Architecture Notes</h2>
+              <p>Short talking points for classroom or project-defense discussion.</p>
+            </div>
+            <div id="architecture-notes" class="notes-grid"></div>
+          </article>
+        </section>
+
+        <p id="app-status" class="app-status">Waiting for analytics...</p>
+      </main>
+    </div>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>

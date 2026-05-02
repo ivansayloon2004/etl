@@ -1,0 +1,6 @@
+route_name,passenger_count,delay_minutes,timestamp
+North Loop,42,7,2026-05-01T07:30:00+08:00
+Harbor Express,25,3,2026-05-01T08:15:00+08:00
+University Shuttle,58,2,2026-05-01T09:05:00+08:00
+Airport Connector,31,12,2026-05-01T17:20:00+08:00
+Riverside Line,22,9,2026-05-01T18:10:00+08:00
