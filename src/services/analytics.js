@@ -21,6 +21,22 @@ function createRouteMaps(routes) {
   return { byId, byName };
 }
 
+function normalizeTripDate(value) {
+  if (typeof value === "string") {
+    return value.slice(0, 10);
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString().slice(0, 10);
+  }
+
+  if (value && typeof value.toISOString === "function") {
+    return value.toISOString().slice(0, 10);
+  }
+
+  return String(value || "");
+}
+
 function hydrateCleanRows(cleanRows, routes, defaults) {
   const { byId } = createRouteMaps(routes);
 
@@ -30,7 +46,7 @@ function hydrateCleanRows(cleanRows, routes, defaults) {
     return {
       routeId: Number(row.routeId),
       routeName: route.routeName || `Route ${row.routeId}`,
-      tripDate: row.tripDate,
+      tripDate: normalizeTripDate(row.tripDate),
       tripHour: Number(row.tripHour),
       totalPassengers: Number(row.totalPassengers),
       averageDelay: Number(row.averageDelay),
