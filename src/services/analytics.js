@@ -317,7 +317,147 @@ function buildEltAnalytics({ rawRows, routes, defaults, metricStats, storageEngi
   });
 }
 
-function buildComparison({ etlAnalytics, eltAnalytics }) {
+function emptyBenchmarkStat() {
+  return {
+    count: 0,
+    averageMs: 0,
+    latestMs: 0,
+    minMs: 0,
+    maxMs: 0,
+    totalRowsProcessed: 0
+  };
+}
+
+function buildBenchmarkStat(records) {
+  if (!records.length) {
+    return emptyBenchmarkStat();
+  }
+
+  const durations = records.map((record) => Number(record.durationMs));
+  const total = durations.reduce((sum, value) => sum + value, 0);
+  const totalRowsProcessed = records.reduce((sum, record) => sum + Number(record.rowsProcessed || 0), 0);
+
+  return {
+    count: records.length,
+    averageMs: roundNumber(total / records.length, 3),
+    latestMs: roundNumber(durations[durations.length - 1], 3),
+    minMs: roundNumber(Math.min(...durations), 3),
+    maxMs: roundNumber(Math.max(...durations), 3),
+    totalRowsProcessed
+  };
+}
+
+function buildTrendSeries(records, limit = 12) {
+  return records.slice(-limit).map((record, index) => ({
+    run: index + 1,
+    durationMs: roundNumber(record.durationMs, 3),
+    rowsProcessed: Number(record.rowsProcessed || 0),
+    createdAt: record.createdAt
+  }));
+}
+
+function speedComparison({ verb, etlStats, eltStats }) {
+  if (!etlStats.count || !eltStats.count) {
+    return {
+      fasterPipeline: "Not enough data",
+      percentFaster: 0,
+      sentence: `Collect more ${verb} benchmarks to compare ETL and ELT.`,
+      etlAverageMs: etlStats.averageMs,
+      eltAverageMs: eltStats.averageMs
+    };
+  }
+
+  const fasterPipeline = etlStats.averageMs <= eltStats.averageMs ? "ETL" : "ELT";
+  const fasterAverage = Math.min(etlStats.averageMs, eltStats.averageMs);
+  const slowerAverage = Math.max(etlStats.averageMs, eltStats.averageMs);
+  const percentFaster = slowerAverage > 0 ? roundNumber(((slowerAverage - fasterAverage) / slowerAverage) * 100, 0) : 0;
+  const action = verb === "reads" ? "querying analytics" : "writing trip events";
+  const sentence =
+    percentFaster === 0
+      ? `ETL and ELT are performing at nearly the same speed for ${action}.`
+      : `${fasterPipeline} ${verb} ${percentFaster}% faster on average.`;
+
+  return {
+    fasterPipeline,
+    percentFaster,
+    sentence,
+    etlAverageMs: etlStats.averageMs,
+    eltAverageMs: eltStats.averageMs
+  };
+}
+
+function buildBenchmarkInsights(benchmarks, historyLimit = 12) {
+  const groups = {
+    etl: {
+      insert: [],
+      analytics_query: []
+    },
+    elt: {
+      insert: [],
+      analytics_query: []
+    }
+  };
+
+  for (const record of benchmarks) {
+    const pipeline = String(record.pipeline || "").toLowerCase();
+    const operation = String(record.operation || "").toLowerCase();
+
+    if (groups[pipeline] && groups[pipeline][operation]) {
+      groups[pipeline][operation].push(record);
+    }
+  }
+
+  const stats = {
+    etl: {
+      ingestion: buildBenchmarkStat(groups.etl.insert),
+      analytics: buildBenchmarkStat(groups.etl.analytics_query)
+    },
+    elt: {
+      ingestion: buildBenchmarkStat(groups.elt.insert),
+      analytics: buildBenchmarkStat(groups.elt.analytics_query)
+    }
+  };
+
+  const readComparison = speedComparison({
+    verb: "reads",
+    etlStats: stats.etl.analytics,
+    eltStats: stats.elt.analytics
+  });
+  const writeComparison = speedComparison({
+    verb: "writes",
+    etlStats: stats.etl.ingestion,
+    eltStats: stats.elt.ingestion
+  });
+
+  const readHeadline =
+    readComparison.fasterPipeline === "Not enough data"
+      ? "Read comparison needs more benchmark runs."
+      : `${readComparison.fasterPipeline} reads ${readComparison.percentFaster}% faster`;
+  const writeHeadline =
+    writeComparison.fasterPipeline === "Not enough data"
+      ? "Write comparison needs more benchmark runs"
+      : `${writeComparison.fasterPipeline} writes ${writeComparison.percentFaster}% faster`;
+
+  return {
+    stats,
+    history: {
+      read: {
+        etl: buildTrendSeries(groups.etl.analytics_query, historyLimit),
+        elt: buildTrendSeries(groups.elt.analytics_query, historyLimit)
+      },
+      write: {
+        etl: buildTrendSeries(groups.etl.insert, historyLimit),
+        elt: buildTrendSeries(groups.elt.insert, historyLimit)
+      }
+    },
+    readComparison,
+    writeComparison,
+    headline: `${readHeadline}, ${writeHeadline}.`,
+    totalRecordedBenchmarks: benchmarks.length
+  };
+}
+
+function buildComparison({ etlAnalytics, eltAnalytics, benchmarkInsights }) {
   const queryDifference = roundNumber(eltAnalytics.pipeline.averageQueryDurationMs - etlAnalytics.pipeline.averageQueryDurationMs);
   const loadDifference = roundNumber(etlAnalytics.pipeline.averageIngestionDurationMs - eltAnalytics.pipeline.averageIngestionDurationMs);
   const transformDifference = roundNumber(eltAnalytics.pipeline.transformDurationMs - etlAnalytics.pipeline.transformDurationMs);
@@ -325,15 +465,15 @@ function buildComparison({ etlAnalytics, eltAnalytics }) {
   return {
     generatedAt: new Date().toISOString(),
     ingestionBenchmark: {
-      etlAverageMs: etlAnalytics.pipeline.averageIngestionDurationMs,
-      eltAverageMs: eltAnalytics.pipeline.averageIngestionDurationMs,
-      fasterForLoading: etlAnalytics.pipeline.averageIngestionDurationMs <= eltAnalytics.pipeline.averageIngestionDurationMs ? "ETL" : "ELT",
+      etlAverageMs: benchmarkInsights.stats.etl.ingestion.averageMs,
+      eltAverageMs: benchmarkInsights.stats.elt.ingestion.averageMs,
+      fasterForLoading: benchmarkInsights.writeComparison.fasterPipeline,
       differenceMs: Math.abs(loadDifference)
     },
     queryBenchmark: {
-      etlAverageMs: etlAnalytics.pipeline.averageQueryDurationMs,
-      eltAverageMs: eltAnalytics.pipeline.averageQueryDurationMs,
-      fasterForAnalytics: etlAnalytics.pipeline.averageQueryDurationMs <= eltAnalytics.pipeline.averageQueryDurationMs ? "ETL" : "ELT",
+      etlAverageMs: benchmarkInsights.stats.etl.analytics.averageMs,
+      eltAverageMs: benchmarkInsights.stats.elt.analytics.averageMs,
+      fasterForAnalytics: benchmarkInsights.readComparison.fasterPipeline,
       differenceMs: Math.abs(queryDifference)
     },
     processingBenchmark: {
@@ -347,6 +487,7 @@ function buildComparison({ etlAnalytics, eltAnalytics }) {
       averageDelayDifference: roundNumber(Math.abs(etlAnalytics.summary.averageDelay - eltAnalytics.summary.averageDelay)),
       busiestHourMatch: etlAnalytics.summary.busiestHour === eltAnalytics.summary.busiestHour
     },
+    benchmarkInsights,
     architecturalDifferences: [
       {
         pipeline: "ETL",
@@ -363,6 +504,7 @@ function buildComparison({ etlAnalytics, eltAnalytics }) {
 }
 
 module.exports = {
+  buildBenchmarkInsights,
   buildComparison,
   buildEltAnalytics,
   buildEtlAnalytics

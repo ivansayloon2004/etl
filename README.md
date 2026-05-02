@@ -51,6 +51,7 @@ Bus Route Performance Tracker is an academic demo system that compares **ETL** a
 - `routes`: master list of bus routes and thresholds.
 - `trips_clean`: ETL-generated hourly route summaries.
 - `trips_raw`: ELT raw trip events.
+- `pipeline_benchmarks`: persisted performance history for ETL/ELT inserts and analytics queries.
 
 ## Setup
 
@@ -102,3 +103,4 @@ If you prefer to create the resources manually instead of using Blueprint:
 - **ETL trade-off:** ingestion takes more work because transformation happens before storage.
 - **ELT advantage:** raw data remains available for reprocessing and flexible analysis.
 - **ELT trade-off:** analytics requests take longer because transformations happen during reads.
+- **Benchmark evidence:** the dashboard now stores historical ETL/ELT read and write timings so you can present percentage-based performance comparisons over time.

@@ -5,15 +5,18 @@ const express = require("express");
 const { performance } = require("node:perf_hooks");
 const config = require("./config");
 const { parseCsvText } = require("./lib/csv");
-const metrics = require("./lib/metrics");
 const { normalizeTripInput, roundNumber } = require("./lib/helpers");
 const { generateTrips } = require("./lib/simulator");
-const { buildComparison, buildEltAnalytics, buildEtlAnalytics } = require("./services/analytics");
+const { buildBenchmarkInsights, buildComparison, buildEltAnalytics, buildEtlAnalytics } = require("./services/analytics");
 const { createStore } = require("./store/createStore");
 
 async function bootstrap() {
   const store = await createStore(config);
   const app = express();
+  const zeroMetricStats = {
+    ingestion: { averageMs: 0 },
+    analytics: { averageMs: 0, latestMs: 0 }
+  };
 
   app.use(express.json({ limit: "2mb" }));
   app.use(express.urlencoded({ extended: true }));
@@ -23,6 +26,11 @@ async function bootstrap() {
     return (request, response, next) => {
       Promise.resolve(handler(request, response, next)).catch(next);
     };
+  }
+
+  async function getBenchmarkInsights(limit = 120) {
+    const benchmarks = await store.fetchBenchmarks({ limit });
+    return buildBenchmarkInsights(benchmarks);
   }
 
   async function addTripToEtl(payload) {
@@ -45,7 +53,12 @@ async function bootstrap() {
     });
 
     const durationMs = roundNumber(performance.now() - startedAt);
-    metrics.record("etl", "ingestion", durationMs, { batchSize: 1 });
+    await store.insertBenchmark({
+      pipeline: "etl",
+      operation: "insert",
+      durationMs,
+      rowsProcessed: 1
+    });
 
     return {
       pipeline: "etl",
@@ -75,8 +88,12 @@ async function bootstrap() {
       timestamp: trip.timestamp
     });
     const durationMs = roundNumber(performance.now() - startedAt);
-
-    metrics.record("elt", "ingestion", durationMs, { batchSize: 1 });
+    await store.insertBenchmark({
+      pipeline: "elt",
+      operation: "insert",
+      durationMs,
+      rowsProcessed: 1
+    });
 
     return {
       pipeline: "elt",
@@ -142,14 +159,21 @@ async function bootstrap() {
       cleanRows,
       routes,
       defaults: config,
-      metricStats: metrics.pipeline("etl"),
+      metricStats: zeroMetricStats,
       storageEngine: store.kind
     });
     const durationMs = roundNumber(performance.now() - startedAt);
+    await store.insertBenchmark({
+      pipeline: "etl",
+      operation: "analytics_query",
+      durationMs,
+      rowsProcessed: cleanRows.length
+    });
+    const benchmarkInsights = await getBenchmarkInsights();
 
-    metrics.record("etl", "analytics", durationMs, { rowCount: cleanRows.length });
-    analytics.pipeline.averageQueryDurationMs = metrics.pipeline("etl").analytics.averageMs;
-    analytics.pipeline.latestQueryDurationMs = metrics.pipeline("etl").analytics.latestMs;
+    analytics.pipeline.averageQueryDurationMs = benchmarkInsights.stats.etl.analytics.averageMs;
+    analytics.pipeline.latestQueryDurationMs = benchmarkInsights.stats.etl.analytics.latestMs;
+    analytics.pipeline.averageIngestionDurationMs = benchmarkInsights.stats.etl.ingestion.averageMs;
 
     return analytics;
   }
@@ -161,14 +185,21 @@ async function bootstrap() {
       rawRows,
       routes,
       defaults: config,
-      metricStats: metrics.pipeline("elt"),
+      metricStats: zeroMetricStats,
       storageEngine: store.kind
     });
     const durationMs = roundNumber(performance.now() - startedAt);
+    await store.insertBenchmark({
+      pipeline: "elt",
+      operation: "analytics_query",
+      durationMs,
+      rowsProcessed: rawRows.length
+    });
+    const benchmarkInsights = await getBenchmarkInsights();
 
-    metrics.record("elt", "analytics", durationMs, { rowCount: rawRows.length });
-    analytics.pipeline.averageQueryDurationMs = metrics.pipeline("elt").analytics.averageMs;
-    analytics.pipeline.latestQueryDurationMs = metrics.pipeline("elt").analytics.latestMs;
+    analytics.pipeline.averageQueryDurationMs = benchmarkInsights.stats.elt.analytics.averageMs;
+    analytics.pipeline.latestQueryDurationMs = benchmarkInsights.stats.elt.analytics.latestMs;
+    analytics.pipeline.averageIngestionDurationMs = benchmarkInsights.stats.elt.ingestion.averageMs;
 
     return analytics;
   }
@@ -231,11 +262,23 @@ async function bootstrap() {
   }));
 
   app.get("/comparison", asyncHandler(async (_request, response) => {
-    const startedAt = performance.now();
     const [etlAnalytics, eltAnalytics] = await Promise.all([getEtlAnalytics(), getEltAnalytics()]);
-    const comparison = buildComparison({ etlAnalytics, eltAnalytics });
-    metrics.record("comparison", "benchmark", roundNumber(performance.now() - startedAt));
-    response.json(comparison);
+    const benchmarkInsights = await getBenchmarkInsights();
+
+    etlAnalytics.pipeline.averageIngestionDurationMs = benchmarkInsights.stats.etl.ingestion.averageMs;
+    etlAnalytics.pipeline.averageQueryDurationMs = benchmarkInsights.stats.etl.analytics.averageMs;
+    etlAnalytics.pipeline.latestQueryDurationMs = benchmarkInsights.stats.etl.analytics.latestMs;
+
+    eltAnalytics.pipeline.averageIngestionDurationMs = benchmarkInsights.stats.elt.ingestion.averageMs;
+    eltAnalytics.pipeline.averageQueryDurationMs = benchmarkInsights.stats.elt.analytics.averageMs;
+    eltAnalytics.pipeline.latestQueryDurationMs = benchmarkInsights.stats.elt.analytics.latestMs;
+
+    const comparison = buildComparison({ etlAnalytics, eltAnalytics, benchmarkInsights });
+    response.json({
+      ...comparison,
+      etlAnalytics,
+      eltAnalytics
+    });
   }));
 
   app.get("*", (_request, response) => {

@@ -176,6 +176,62 @@ class PostgresStore {
       timestamp: row.timestamp
     }));
   }
+
+  async insertBenchmark({ pipeline, operation, durationMs, rowsProcessed }) {
+    const result = await this.pool.query(
+      `
+        INSERT INTO pipeline_benchmarks (pipeline, operation, duration_ms, rows_processed)
+        VALUES ($1, $2, $3, $4)
+        RETURNING
+          id,
+          pipeline,
+          operation,
+          duration_ms AS "durationMs",
+          rows_processed AS "rowsProcessed",
+          created_at AS "createdAt";
+      `,
+      [pipeline, operation, roundNumber(durationMs, 3), Number(rowsProcessed || 0)]
+    );
+
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      pipeline: row.pipeline,
+      operation: row.operation,
+      durationMs: Number(row.durationMs),
+      rowsProcessed: Number(row.rowsProcessed),
+      createdAt: row.createdAt
+    };
+  }
+
+  async fetchBenchmarks({ limit = 120 } = {}) {
+    const result = await this.pool.query(
+      `
+        SELECT
+          id,
+          pipeline,
+          operation,
+          duration_ms AS "durationMs",
+          rows_processed AS "rowsProcessed",
+          created_at AS "createdAt"
+        FROM pipeline_benchmarks
+        ORDER BY created_at DESC
+        LIMIT $1;
+      `,
+      [Math.max(1, Number(limit || 120))]
+    );
+
+    return result.rows
+      .map((row) => ({
+        id: row.id,
+        pipeline: row.pipeline,
+        operation: row.operation,
+        durationMs: Number(row.durationMs),
+        rowsProcessed: Number(row.rowsProcessed),
+        createdAt: row.createdAt
+      }))
+      .reverse();
+  }
 }
 
 module.exports = {

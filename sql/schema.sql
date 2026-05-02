@@ -31,11 +31,23 @@ CREATE TABLE IF NOT EXISTS trips_raw (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS pipeline_benchmarks (
+  id SERIAL PRIMARY KEY,
+  pipeline VARCHAR(20) NOT NULL,
+  operation VARCHAR(40) NOT NULL,
+  duration_ms NUMERIC(10, 3) NOT NULL,
+  rows_processed INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_trips_clean_route_date_hour
   ON trips_clean (route_id, trip_date, trip_hour);
 
 CREATE INDEX IF NOT EXISTS idx_trips_raw_route_timestamp
   ON trips_raw (route_name, "timestamp");
+
+CREATE INDEX IF NOT EXISTS idx_pipeline_benchmarks_lookup
+  ON pipeline_benchmarks (pipeline, operation, created_at);
 
 INSERT INTO routes (route_name, corridor, bus_capacity, delay_threshold)
 VALUES

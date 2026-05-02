@@ -7,9 +7,11 @@ class MemoryStore {
     this.routeSequence = 1;
     this.cleanSequence = 1;
     this.rawSequence = 1;
+    this.benchmarkSequence = 1;
     this.routes = [];
     this.tripsClean = [];
     this.tripsRaw = [];
+    this.pipelineBenchmarks = [];
   }
 
   async init() {
@@ -123,6 +125,28 @@ class MemoryStore {
 
   async fetchRawTrips() {
     return this.tripsRaw.map((trip) => ({ ...trip }));
+  }
+
+  async insertBenchmark({ pipeline, operation, durationMs, rowsProcessed }) {
+    const record = {
+      id: this.benchmarkSequence,
+      pipeline,
+      operation,
+      durationMs: roundNumber(durationMs, 3),
+      rowsProcessed: Number(rowsProcessed || 0),
+      createdAt: new Date().toISOString()
+    };
+
+    this.benchmarkSequence += 1;
+    this.pipelineBenchmarks.push(record);
+
+    return { ...record };
+  }
+
+  async fetchBenchmarks({ limit = 120 } = {}) {
+    return this.pipelineBenchmarks
+      .slice(-Math.max(1, limit))
+      .map((record) => ({ ...record }));
   }
 }
 

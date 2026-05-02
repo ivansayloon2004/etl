@@ -21,6 +21,10 @@ function formatPercent(value) {
   return `${Number(value || 0).toFixed(1)}%`;
 }
 
+function formatMilliseconds(value) {
+  return `${Number(value || 0).toFixed(2)} ms`;
+}
+
 function setStatus(message) {
   elements.appStatus.textContent = message;
 }
@@ -58,22 +62,30 @@ async function fetchJson(url, options = {}) {
 function renderMetricGrid() {
   if (state.activeMode === "compare" && state.comparison) {
     const comparison = state.comparison;
+    const readComparison = comparison.benchmarkInsights.readComparison;
+    const writeComparison = comparison.benchmarkInsights.writeComparison;
 
     elements.metricGrid.innerHTML = [
       {
-        label: "ETL Avg Query",
-        value: `${comparison.queryBenchmark.etlAverageMs.toFixed(2)} ms`,
-        hint: "Read time from pre-aggregated ETL tables."
+        label: "Read Advantage",
+        value:
+          readComparison.fasterPipeline === "Not enough data"
+            ? "Need data"
+            : `${readComparison.fasterPipeline} ${readComparison.percentFaster}%`,
+        hint: `ETL ${formatMilliseconds(readComparison.etlAverageMs)} vs ELT ${formatMilliseconds(readComparison.eltAverageMs)}.`
       },
       {
-        label: "ELT Avg Query",
-        value: `${comparison.queryBenchmark.eltAverageMs.toFixed(2)} ms`,
-        hint: "Read time including on-demand transformations."
+        label: "Write Advantage",
+        value:
+          writeComparison.fasterPipeline === "Not enough data"
+            ? "Need data"
+            : `${writeComparison.fasterPipeline} ${writeComparison.percentFaster}%`,
+        hint: `ETL ${formatMilliseconds(writeComparison.etlAverageMs)} vs ELT ${formatMilliseconds(writeComparison.eltAverageMs)}.`
       },
       {
-        label: "Faster Loader",
-        value: comparison.ingestionBenchmark.fasterForLoading,
-        hint: `${comparison.ingestionBenchmark.differenceMs.toFixed(2)} ms average difference during ingestion.`
+        label: "Benchmarks Logged",
+        value: formatNumber(comparison.benchmarkInsights.totalRecordedBenchmarks),
+        hint: "History includes ETL/ELT inserts and analytics queries."
       },
       {
         label: "Output Parity",
@@ -314,17 +326,19 @@ function renderComparison() {
   }
 
   const comparison = state.comparison;
+  const readComparison = comparison.benchmarkInsights.readComparison;
+  const writeComparison = comparison.benchmarkInsights.writeComparison;
 
   const cards = [
     {
       title: "Query Speed",
       value: comparison.queryBenchmark.fasterForAnalytics,
-      body: `Difference: ${comparison.queryBenchmark.differenceMs.toFixed(2)} ms. ETL ${comparison.queryBenchmark.etlAverageMs.toFixed(2)} ms vs ELT ${comparison.queryBenchmark.eltAverageMs.toFixed(2)} ms.`
+      body: `${readComparison.sentence} ETL ${formatMilliseconds(comparison.queryBenchmark.etlAverageMs)} vs ELT ${formatMilliseconds(comparison.queryBenchmark.eltAverageMs)}.`
     },
     {
       title: "Load Speed",
       value: comparison.ingestionBenchmark.fasterForLoading,
-      body: `Difference: ${comparison.ingestionBenchmark.differenceMs.toFixed(2)} ms between average ETL and ELT ingestion time.`
+      body: `${writeComparison.sentence} ETL ${formatMilliseconds(comparison.ingestionBenchmark.etlAverageMs)} vs ELT ${formatMilliseconds(comparison.ingestionBenchmark.eltAverageMs)}.`
     },
     {
       title: "Read-Time Transform",
@@ -349,6 +363,90 @@ function renderComparison() {
       `
     )
     .join("");
+}
+
+function renderBenchmarkChart(container, series, comparison) {
+  const etlPoints = series.etl || [];
+  const eltPoints = series.elt || [];
+
+  if (!etlPoints.length && !eltPoints.length) {
+    container.innerHTML = `<div class="empty-state">Benchmark history will appear after you run inserts and refresh analytics.</div>`;
+    return;
+  }
+
+  const width = 520;
+  const height = 220;
+  const padding = 26;
+  const maxPointCount = Math.max(etlPoints.length, eltPoints.length, 1);
+  const allDurations = [...etlPoints, ...eltPoints].map((point) => point.durationMs);
+  const maxDuration = Math.max(...allDurations, 1);
+
+  const lineFor = (points) =>
+    points
+      .map((point) => {
+        const x =
+          maxPointCount === 1
+            ? width / 2
+            : padding + ((point.run - 1) / (maxPointCount - 1)) * (width - padding * 2);
+        const y = height - padding - (point.durationMs / maxDuration) * (height - padding * 2);
+        return `${x},${y}`;
+      })
+      .join(" ");
+
+  const circlesFor = (points, color) =>
+    points
+      .map((point) => {
+        const x =
+          maxPointCount === 1
+            ? width / 2
+            : padding + ((point.run - 1) / (maxPointCount - 1)) * (width - padding * 2);
+        const y = height - padding - (point.durationMs / maxDuration) * (height - padding * 2);
+        return `<circle cx="${x}" cy="${y}" r="4.5" fill="${color}" stroke="#ffffff" stroke-width="2"></circle>`;
+      })
+      .join("");
+
+  const etlLatest = etlPoints[etlPoints.length - 1];
+  const eltLatest = eltPoints[eltPoints.length - 1];
+
+  container.innerHTML = `
+    <svg class="benchmark-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Benchmark trend chart">
+      <line x1="${padding}" y1="${height - padding}" x2="${width - padding}" y2="${height - padding}" stroke="#d7e7eb" stroke-width="1.5"></line>
+      <line x1="${padding}" y1="${padding}" x2="${padding}" y2="${height - padding}" stroke="#d7e7eb" stroke-width="1.5"></line>
+      ${etlPoints.length ? `<polyline fill="none" stroke="#0b8f8d" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" points="${lineFor(etlPoints)}"></polyline>` : ""}
+      ${eltPoints.length ? `<polyline fill="none" stroke="#f1a73b" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" points="${lineFor(eltPoints)}"></polyline>` : ""}
+      ${circlesFor(etlPoints, "#0b8f8d")}
+      ${circlesFor(eltPoints, "#f1a73b")}
+    </svg>
+    <div class="benchmark-legend">
+      <span class="legend-chip"><span class="legend-dot etl"></span>ETL avg ${formatMilliseconds(comparison.etlAverageMs)}</span>
+      <span class="legend-chip"><span class="legend-dot elt"></span>ELT avg ${formatMilliseconds(comparison.eltAverageMs)}</span>
+    </div>
+    <div class="benchmark-meta">
+      <div>${comparison.sentence}</div>
+      <div>${etlLatest ? `Latest ETL run: ${formatMilliseconds(etlLatest.durationMs)} across ${formatNumber(etlLatest.rowsProcessed)} rows.` : "No ETL run recorded yet."}</div>
+      <div>${eltLatest ? `Latest ELT run: ${formatMilliseconds(eltLatest.durationMs)} across ${formatNumber(eltLatest.rowsProcessed)} rows.` : "No ELT run recorded yet."}</div>
+    </div>
+  `;
+}
+
+function renderBenchmarkTrends() {
+  if (!state.comparison) {
+    elements.benchmarkSummary.innerHTML = `<div class="empty-state">Benchmark summary will appear after analytics refresh.</div>`;
+    elements.benchmarkReadChart.innerHTML = "";
+    elements.benchmarkWriteChart.innerHTML = "";
+    return;
+  }
+
+  const benchmarkInsights = state.comparison.benchmarkInsights;
+
+  elements.benchmarkSummary.innerHTML = `
+    <strong>${benchmarkInsights.headline}</strong>
+    <p>${benchmarkInsights.readComparison.sentence}</p>
+    <p>${benchmarkInsights.writeComparison.sentence}</p>
+  `;
+
+  renderBenchmarkChart(elements.benchmarkReadChart, benchmarkInsights.history.read, benchmarkInsights.readComparison);
+  renderBenchmarkChart(elements.benchmarkWriteChart, benchmarkInsights.history.write, benchmarkInsights.writeComparison);
 }
 
 function renderArchitectureNotes() {
@@ -401,23 +499,22 @@ function renderDashboard() {
   renderPeakHours();
   renderDelayProfile();
   renderRouteTable();
+  renderBenchmarkTrends();
   renderComparison();
   renderArchitectureNotes();
   updateStatusStrip();
 }
 
 async function refreshDashboard() {
-  setStatus("Refreshing ETL, ELT, and comparison analytics...");
-  const [health, etl, elt, comparison] = await Promise.all([
+  setStatus("Refreshing ETL, ELT, comparison, and benchmark analytics...");
+  const [health, comparison] = await Promise.all([
     fetchJson("/health", { method: "GET" }),
-    fetchJson("/etl/analytics", { method: "GET" }),
-    fetchJson("/elt/analytics", { method: "GET" }),
     fetchJson("/comparison", { method: "GET" })
   ]);
 
   state.health = health;
-  state.etl = etl;
-  state.elt = elt;
+  state.etl = comparison.etlAnalytics;
+  state.elt = comparison.eltAnalytics;
   state.comparison = comparison;
 
   renderDashboard();
@@ -518,6 +615,9 @@ async function init() {
   Object.assign(elements, {
     appStatus: document.getElementById("app-status"),
     architectureNotes: document.getElementById("architecture-notes"),
+    benchmarkReadChart: document.getElementById("benchmark-read-chart"),
+    benchmarkSummary: document.getElementById("benchmark-summary"),
+    benchmarkWriteChart: document.getElementById("benchmark-write-chart"),
     busCapacity: document.getElementById("bus-capacity"),
     comparisonGrid: document.getElementById("comparison-grid"),
     csvText: document.getElementById("csv-text"),
