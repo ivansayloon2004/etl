@@ -9,6 +9,71 @@ const state = {
 
 const elements = {};
 
+function defaultBenchmarkInsights() {
+  return {
+    stats: {
+      etl: {
+        ingestion: { averageMs: 0, latestMs: 0, count: 0 },
+        analytics: { averageMs: 0, latestMs: 0, count: 0 }
+      },
+      elt: {
+        ingestion: { averageMs: 0, latestMs: 0, count: 0 },
+        analytics: { averageMs: 0, latestMs: 0, count: 0 }
+      }
+    },
+    history: {
+      read: { etl: [], elt: [] },
+      write: { etl: [], elt: [] }
+    },
+    readComparison: {
+      fasterPipeline: "Not enough data",
+      percentFaster: 0,
+      sentence: "Collect more read benchmarks to compare ETL and ELT.",
+      etlAverageMs: 0,
+      eltAverageMs: 0
+    },
+    writeComparison: {
+      fasterPipeline: "Not enough data",
+      percentFaster: 0,
+      sentence: "Collect more write benchmarks to compare ETL and ELT.",
+      etlAverageMs: 0,
+      eltAverageMs: 0
+    },
+    headline: "Benchmark history will appear after enough ETL and ELT runs are recorded.",
+    totalRecordedBenchmarks: 0
+  };
+}
+
+function defaultComparison() {
+  return {
+    ingestionBenchmark: {
+      etlAverageMs: 0,
+      eltAverageMs: 0,
+      fasterForLoading: "Not enough data",
+      differenceMs: 0
+    },
+    queryBenchmark: {
+      etlAverageMs: 0,
+      eltAverageMs: 0,
+      fasterForAnalytics: "Not enough data",
+      differenceMs: 0
+    },
+    processingBenchmark: {
+      etlTransformDuringReadMs: 0,
+      eltTransformDuringReadMs: 0,
+      extraReadTimeMs: 0
+    },
+    outputParity: {
+      totalPassengersDifference: 0,
+      totalTripsDifference: 0,
+      averageDelayDifference: 0,
+      busiestHourMatch: true
+    },
+    benchmarkInsights: defaultBenchmarkInsights(),
+    architecturalDifferences: []
+  };
+}
+
 function formatNumber(value) {
   return new Intl.NumberFormat().format(Number(value || 0));
 }
@@ -26,7 +91,9 @@ function formatMilliseconds(value) {
 }
 
 function setStatus(message) {
-  elements.appStatus.textContent = message;
+  if (elements.appStatus) {
+    elements.appStatus.textContent = message;
+  }
 }
 
 function toLocalDateTimeInputValue(date = new Date()) {
@@ -59,11 +126,32 @@ async function fetchJson(url, options = {}) {
   return payload;
 }
 
+async function fetchJsonSafe(url, options = {}) {
+  try {
+    return {
+      ok: true,
+      data: await fetchJson(url, options)
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error.message
+    };
+  }
+}
+
 function renderMetricGrid() {
   if (state.activeMode === "compare" && state.comparison) {
-    const comparison = state.comparison;
-    const readComparison = comparison.benchmarkInsights.readComparison;
-    const writeComparison = comparison.benchmarkInsights.writeComparison;
+    const comparison = {
+      ...defaultComparison(),
+      ...state.comparison,
+      benchmarkInsights: {
+        ...defaultBenchmarkInsights(),
+        ...(state.comparison.benchmarkInsights || {})
+      }
+    };
+    const readComparison = comparison.benchmarkInsights.readComparison || defaultBenchmarkInsights().readComparison;
+    const writeComparison = comparison.benchmarkInsights.writeComparison || defaultBenchmarkInsights().writeComparison;
 
     elements.metricGrid.innerHTML = [
       {
@@ -325,7 +413,14 @@ function renderComparison() {
     return;
   }
 
-  const comparison = state.comparison;
+  const comparison = {
+    ...defaultComparison(),
+    ...state.comparison,
+    benchmarkInsights: {
+      ...defaultBenchmarkInsights(),
+      ...(state.comparison.benchmarkInsights || {})
+    }
+  };
   const readComparison = comparison.benchmarkInsights.readComparison;
   const writeComparison = comparison.benchmarkInsights.writeComparison;
 
@@ -430,6 +525,10 @@ function renderBenchmarkChart(container, series, comparison) {
 }
 
 function renderBenchmarkTrends() {
+  if (!elements.benchmarkSummary || !elements.benchmarkReadChart || !elements.benchmarkWriteChart) {
+    return;
+  }
+
   if (!state.comparison) {
     elements.benchmarkSummary.innerHTML = `<div class="empty-state">Benchmark summary will appear after analytics refresh.</div>`;
     elements.benchmarkReadChart.innerHTML = "";
@@ -437,7 +536,10 @@ function renderBenchmarkTrends() {
     return;
   }
 
-  const benchmarkInsights = state.comparison.benchmarkInsights;
+  const benchmarkInsights = {
+    ...defaultBenchmarkInsights(),
+    ...(state.comparison.benchmarkInsights || {})
+  };
 
   elements.benchmarkSummary.innerHTML = `
     <strong>${benchmarkInsights.headline}</strong>
@@ -455,8 +557,12 @@ function renderArchitectureNotes() {
     return;
   }
 
+  const comparison = {
+    ...defaultComparison(),
+    ...state.comparison
+  };
   const noteCards = [
-    ...state.comparison.architecturalDifferences.map(
+    ...comparison.architecturalDifferences.map(
       (difference) => `
         <article class="note-card">
           <strong>${difference.pipeline}</strong>
@@ -484,13 +590,21 @@ function renderArchitectureNotes() {
 }
 
 function updateStatusStrip() {
-  elements.storageEngine.textContent = state.health ? state.health.storageEngine.toUpperCase() : "Loading...";
-  elements.timezoneLabel.textContent = state.health ? state.health.timeZone : "Asia/Singapore";
-  elements.modeLabel.textContent = state.activeMode === "compare" ? "COMPARE" : state.activeMode.toUpperCase();
-  elements.trendCaption.textContent =
-    state.activeMode === "compare"
-      ? "Charts continue to show the shared analytics output while comparison cards highlight pipeline differences."
-      : `Daily ridership by ${state.activeMode.toUpperCase()} pipeline.`;
+  if (elements.storageEngine) {
+    elements.storageEngine.textContent = state.health ? state.health.storageEngine.toUpperCase() : "Loading...";
+  }
+  if (elements.timezoneLabel) {
+    elements.timezoneLabel.textContent = state.health ? state.health.timeZone : "Asia/Singapore";
+  }
+  if (elements.modeLabel) {
+    elements.modeLabel.textContent = state.activeMode === "compare" ? "COMPARE" : state.activeMode.toUpperCase();
+  }
+  if (elements.trendCaption) {
+    elements.trendCaption.textContent =
+      state.activeMode === "compare"
+        ? "Charts continue to show the shared analytics output while comparison cards highlight pipeline differences."
+        : `Daily ridership by ${state.activeMode.toUpperCase()} pipeline.`;
+  }
 }
 
 function renderDashboard() {
@@ -507,18 +621,43 @@ function renderDashboard() {
 
 async function refreshDashboard() {
   setStatus("Refreshing ETL, ELT, comparison, and benchmark analytics...");
-  const [health, comparison] = await Promise.all([
-    fetchJson("/health", { method: "GET" }),
-    fetchJson("/comparison", { method: "GET" })
+  const [healthResult, etlResult, eltResult, comparisonResult] = await Promise.all([
+    fetchJsonSafe("/health", { method: "GET" }),
+    fetchJsonSafe("/etl/analytics", { method: "GET" }),
+    fetchJsonSafe("/elt/analytics", { method: "GET" }),
+    fetchJsonSafe("/comparison", { method: "GET" })
   ]);
 
-  state.health = health;
-  state.etl = comparison.etlAnalytics;
-  state.elt = comparison.eltAnalytics;
-  state.comparison = comparison;
+  if (!healthResult.ok) {
+    throw new Error(`Health check failed: ${healthResult.error}`);
+  }
+
+  if (!etlResult.ok || !eltResult.ok) {
+    throw new Error(`Analytics failed to load: ${etlResult.error || eltResult.error}`);
+  }
+
+  state.health = healthResult.data;
+  state.etl = etlResult.data;
+  state.elt = eltResult.data;
+  state.comparison = comparisonResult.ok
+    ? {
+        ...defaultComparison(),
+        ...comparisonResult.data,
+        benchmarkInsights: {
+          ...defaultBenchmarkInsights(),
+          ...(comparisonResult.data.benchmarkInsights || {})
+        },
+        etlAnalytics: comparisonResult.data.etlAnalytics || etlResult.data,
+        eltAnalytics: comparisonResult.data.eltAnalytics || eltResult.data
+      }
+    : defaultComparison();
 
   renderDashboard();
-  setStatus("Analytics refreshed.");
+  setStatus(
+    comparisonResult.ok
+      ? "Analytics refreshed."
+      : `Core analytics refreshed, but comparison data failed: ${comparisonResult.error}`
+  );
 }
 
 async function loadRoutes() {
